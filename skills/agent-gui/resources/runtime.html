@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent GUI</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+    background: #1e1e2e; color: #cdd6f4;
+  }
+  .bar {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 14px; background: #181825;
+    border-bottom: 1px solid #313244; flex-shrink: 0;
+    font-size: 12px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.connected { background: #a6e3a1; }
+  .dot.disconnected { background: #f38ba8; }
+  .dot.waiting { background: #f9e2af; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+  #status-text { flex: 1; }
+  #frame-box { flex: 1; position: relative; background: #fff; }
+  #frame-box iframe { width: 100%; height: 100%; border: none; }
+  .overlay {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    background: rgba(30,30,46,0.8); color: #a6adc8;
+    font-size: 15px; text-align: center; padding: 24px;
+  }
+  .overlay.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div id="dot" class="dot waiting"></div>
+  <span id="status-text">Connecting...</span>
+</div>
+
+<div id="frame-box">
+  <div id="overlay" class="overlay">Waiting for Agent to send UI...</div>
+</div>
+
+<script>
+// ── WebSocket ──
+const ws = new WebSocket(`ws://${location.host}/ws`);
+const dot = document.getElementById("dot");
+const statusText = document.getElementById("status-text");
+const overlay = document.getElementById("overlay");
+const frameBox = document.getElementById("frame-box");
+
+let iframe = null;
+
+function setStatus(state, text) {
+  dot.className = "dot " + state;
+  statusText.textContent = text;
+  overlay.classList.toggle("hidden", state === "connected");
+  if (state === "connected") overlay.textContent = "";
+}
+
+ws.onopen = () => setStatus("connected", "Connected. Waiting for UI...");
+ws.onclose = () => setStatus("disconnected", "Disconnected. Reload to reconnect.");
+ws.onerror = () => setStatus("disconnected", "Connection error.");
+
+ws.onmessage = (e) => {
+  try {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "init") handleInit(msg.html);
+    else if (msg.type === "update") handleUpdate(msg.updates);
+  } catch (err) {
+    console.error("handleMessage error:", err);
+    setStatus("disconnected", "Error: " + err.message);
+  }
+};
+
+// ── Runtime: Init ──
+function handleInit(html) {
+  // Remove old iframe
+  if (iframe) { iframe.remove(); iframe = null; }
+
+  iframe = document.createElement("iframe");
+  iframe.sandbox = "allow-scripts allow-same-origin";
+  iframe.title = "Agent UI";
+
+  iframe.addEventListener("load", () => {
+    setupEvents(iframe.contentDocument);
+    sendSnapshot();
+    setStatus("connected", "Ready");
+  });
+
+  frameBox.appendChild(iframe);
+  iframe.srcdoc = html;
+}
+
+// ── Runtime: Update ──
+function safeCssEscape(str) {
+  try { return CSS.escape(str); } catch {
+    return str.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+}
+
+function handleUpdate(updates) {
+  if (!iframe?.contentDocument) {
+    console.warn("handleUpdate: no iframe contentDocument");
+    return;
+  }
+  const doc = iframe.contentDocument;
+  for (const [name, html] of Object.entries(updates)) {
+    const escaped = safeCssEscape(name);
+    const el = doc.querySelector(`[data-region="${escaped}"]`);
+    if (el) {
+      el.innerHTML = html;
+    } else {
+      console.warn(`Region "${name}" not found`);
+    }
+  }
+  sendSnapshot();
+  setStatus("connected", "Ready");
+}
+
+// ── Runtime: Event Delegation ──
+
+function setupEvents(doc) {
+  doc.addEventListener("click", (e) => {
+    const target = e.target.closest("[data-action]");
+    if (!target) return;
+    const region = target.closest("[data-region]");
+    if (!region) return;
+
+    e.preventDefault();
+    sendAction({
+      action: target.dataset.action,
+      id: target.dataset.id,
+      region: region.dataset.region,
+      payload: target.dataset.payload ? parsePayload(target.dataset.payload) : undefined,
+    });
+  });
+
+  doc.addEventListener("input", (e) => {
+    const target = e.target.closest("[data-action]");
+    if (!target) return;
+    const region = target.closest("[data-region]");
+    if (!region) return;
+
+    sendAction({
+      action: target.dataset.action,
+      id: target.dataset.id,
+      value: target.value,
+      region: region.dataset.region,
+    });
+  });
+
+  doc.addEventListener("change", (e) => {
+    const target = e.target.closest("[data-action]");
+    if (!target) return;
+    if (target.tagName === "TEXTAREA") return;
+    if (target.tagName === "INPUT" && !["checkbox", "radio"].includes(target.type)) return;
+    const region = target.closest("[data-region]");
+    if (!region) return;
+
+    sendAction({
+      action: target.dataset.action,
+      id: target.dataset.id,
+      value: target.value,
+      region: region.dataset.region,
+    });
+  });
+}
+
+// ── Runtime: Context Capture ──
+
+function syncFormState(root) {
+  for (const el of root.querySelectorAll("input, textarea, select")) {
+    if (el.type === "checkbox" || el.type === "radio") {
+      el.toggleAttribute("checked", el.checked);
+    } else if (el.tagName === "TEXTAREA") {
+      el.textContent = el.value;
+    } else if (el.tagName === "SELECT") {
+      for (const opt of el.options) {
+        opt.toggleAttribute("selected", opt.selected);
+      }
+    } else {
+      el.setAttribute("value", el.value);
+    }
+  }
+}
+
+function captureContext(doc, regionName) {
+  if (regionName) {
+    const region = doc.querySelector(`[data-region="${CSS.escape(regionName)}"]`);
+    if (!region) return {};
+    const clone = region.cloneNode(true);
+    syncFormState(clone);
+    return { [regionName]: clone.outerHTML };
+  }
+  const context = {};
+  for (const region of doc.querySelectorAll("[data-region]")) {
+    const clone = region.cloneNode(true);
+    syncFormState(clone);
+    context[region.dataset.region] = clone.outerHTML;
+  }
+  return context;
+}
+
+// ── Runtime: Send Action ──
+
+function parsePayload(raw) {
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
+function sendAction(data) {
+  if (!iframe?.contentDocument) return;
+  const context = captureContext(iframe.contentDocument, data.region);
+  const msg = { ...data, type: "action", context };
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
+}
+
+// ── Listen for Agent.act() from iframe ──
+
+window.addEventListener("message", (e) => {
+  if (e.data?.type !== "agent:action") return;
+  if (!iframe?.contentDocument) return;
+  const { type, action, ...detail } = e.data;
+  sendAction({ action, ...detail });
+});
+
+// ── Snapshot: send full HTML back to bridge for persistence ──
+
+function sendSnapshot() {
+  if (!iframe?.contentDocument) return;
+  const html = iframe.contentDocument.documentElement.outerHTML;
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "snapshot", html }));
+  }
+}
+
+</script>
+</body>
+</html>

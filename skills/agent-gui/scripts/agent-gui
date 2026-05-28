@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Agent GUI CLI — thin wrapper around the bridge HTTP API."""
+
+import argparse, json, os, sys, time, urllib.request, urllib.error
+
+PORT = int(os.environ.get("AGENT_GUI_PORT", 3001))
+BRIDGE = f"http://localhost:{PORT}"
+
+
+def _get(path: str) -> dict | None:
+    try:
+        with urllib.request.urlopen(f"{BRIDGE}{path}", timeout=90) as r:
+            return json.loads(r.read())
+    except urllib.error.URLError as e:
+        die(f"Bridge unreachable: {e.reason}")
+
+
+def _post(path: str, data: dict) -> dict:
+    try:
+        body = json.dumps(data).encode()
+        req = urllib.request.Request(f"{BRIDGE}{path}", data=body,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except urllib.error.URLError as e:
+        die(f"Bridge unreachable: {e.reason}")
+
+
+def die(msg: str):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def _clean(action: dict) -> dict:
+    """Strip internal fields, return only business data."""
+    action.pop("type", None)
+    action.pop("context", None)
+    action.pop("region", None)
+    return action
+
+
+def cmd_status():
+    s = _get("/status")
+    if s["browserConnected"]:
+        print("connected")
+    else:
+        print("disconnected")
+
+
+def cmd_send(file: str | None = None, html: str | None = None):
+    if file:
+        result = _post("/init", {"file": file})
+    elif html:
+        result = _post("/init", {"html": html})
+    else:
+        die("Need --file or --html")
+    if not result.get("ok"):
+        die(f"Send failed: browser not connected. Open {BRIDGE} first.")
+
+
+def cmd_update(updates: str):
+    try:
+        data = json.loads(updates)
+    except json.JSONDecodeError:
+        die(f"Invalid JSON: {updates}")
+    result = _post("/update", data)
+    if not result.get("ok"):
+        die("Update failed: browser not connected.")
+
+
+def cmd_wait(timeout: float | None, action_filter: str | None):
+    if timeout is None:
+        timeout = 60  # default: block up to 60s
+
+    deadline = time.time() + timeout if timeout > 0 else 0
+
+    while True:
+        remaining = max(deadline - time.time(), 0) if deadline else 0
+        if timeout > 0 and remaining <= 0:
+            break
+
+        result = _get(f"/wait?timeout={remaining}")
+
+        if result is None:
+            if timeout == 0:
+                break  # non-blocking, no action
+            continue  # blocking timeout, retry
+
+        if action_filter and result.get("action") != action_filter:
+            continue  # skip non-matching
+
+        print(json.dumps(_clean(result)))
+        return
+
+    # No matching action found
+    if timeout == 0:
+        print("null")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="agent-gui")
+    p.add_argument("--port", "-p", type=int, default=PORT,
+                   help=f"Bridge port (default: {PORT}, env: AGENT_GUI_PORT)")
+    sub = p.add_subparsers(dest="cmd")
+
+    sp = sub.add_parser("status", help="Check browser connection")
+
+    sp = sub.add_parser("send", help="Send full HTML to browser")
+    sp.add_argument("--file", help="Path to HTML file")
+    sp.add_argument("--html", help="Inline HTML string")
+
+    sp = sub.add_parser("update", help="Push region updates")
+    sp.add_argument("data", help='JSON updates, e.g. \'{"region":"...html..."}\'')
+
+    sp = sub.add_parser("wait", help="Pop next action from queue")
+    sp.add_argument("--timeout", "-t", type=float, default=None,
+                    help="Seconds to block (default 60, 0 = non-blocking)")
+    sp.add_argument("--action", "-a",
+                    help="Only return actions matching this name (skips others)")
+
+    args = p.parse_args()
+    global BRIDGE
+    BRIDGE = f"http://localhost:{args.port}"
+
+    if args.cmd == "status":
+        cmd_status()
+    elif args.cmd == "send":
+        cmd_send(file=args.file, html=args.html)
+    elif args.cmd == "update":
+        cmd_update(args.data)
+    elif args.cmd == "wait":
+        cmd_wait(args.timeout, args.action)
+    else:
+        p.print_help()
+
+
+if __name__ == "__main__":
+    main()
