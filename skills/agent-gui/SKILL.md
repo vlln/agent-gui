@@ -1,23 +1,20 @@
 ---
 name: agent-gui
-description: Generate interactive HTML UIs that users can manipulate in a browser. Uses 3 custom attributes (data-region, data-action, data-id) on standard HTML. User interactions are logged for the Agent to read when needed. The Agent can push partial or full HTML updates to the running UI at any time.
+description: Use this skill when you need to generate interactive HTML UIs that users can manipulate in a browser — dashboards, task boards, forms, charts, CRUD interfaces, mini-games, data explorers, or multi-step workflows.
+license: MIT
 metadata:
-  skit:
-    version: 0.2.0
-    requires:
-      bins:
-        - python3
-      scripts:
-        - agent-gui
-    keywords:
-      - gui
-      - html
-      - interactive
+  author: vlln
+  version: "0.2.0"
+requires:
+  bins:
+    - python3
 ---
 
 # Agent GUI
 
-Generate polished, interactive HTML UIs in a sandboxed iframe. **User interacts freely; the Agent only reads actions when asked in chat.** Use `data-region`, `data-action`, `data-id` on standard HTML — no new DSL.
+Generate polished, interactive HTML UIs in a sandboxed iframe. The user interacts
+freely; the Agent only reads actions when asked in chat. Use `data-region`,
+`data-action`, `data-id` on standard HTML — no new DSL.
 
 ```
 Agent generates UI → User interacts (0 to ∞ actions, no Agent involvement)
@@ -27,49 +24,15 @@ Agent generates UI → User interacts (0 to ∞ actions, no Agent involvement)
                   Agent reads action log → responds or pushes UI updates
 ```
 
+## Trigger Keywords
+
+GUI, UI, dashboard, form, chart, interactive, widget, visual, interface, browser,
+HTML, web app, task board, CRUD, data explorer, mini-game, wizard, drag-and-drop
+
 ## When To Use
 
-Anything visual beyond Markdown: dashboards, task boards, forms, charts, CRUD, mini-games, data explorers, multi-step workflows.
-
-## Workflow
-
-### 1. Start bridge + user opens browser
-
-```bash
-python3 bridge.py &
-# Default port 3001. Custom: python3 bridge.py --port 8080 or PORT=8080 python3 bridge.py
-# Tell the user: Open http://localhost:3001
-```
-
-### 2. Send initial HTML
-
-Write a complete HTML page using `data-region`, `data-action`, `data-id`, with the Agent API script (see template below). Then:
-
-```bash
-agent-gui send --file /tmp/ui.html     # from file
-agent-gui send --html "<!DOCTYPE..."   # or inline
-```
-
-To replace the entire UI, use `agent-gui send --file ...` again.
-
-### 3. Read user actions
-
-```bash
-agent-gui wait -t 0             # non-blocking: null if nothing new
-agent-gui wait                  # blocking: wait up to 60s
-agent-gui wait -a submit        # skip until action="submit"
-cat /tmp/agent-gui-actions.jsonl  # full history
-```
-
-CLI strips internal fields — output is clean business JSON: `{"action":"select_task","id":"task_1","value":"..."}`
-
-### 4. Push updates (optional)
-
-```bash
-agent-gui update '{"region":"...innerHTML..."}'
-```
-
-Values replace `region_element.innerHTML`. Only include changed regions.
+Anything visual beyond Markdown: dashboards, task boards, forms, charts, CRUD,
+mini-games, data explorers, multi-step workflows.
 
 ## The 3 Attributes
 
@@ -79,9 +42,38 @@ Values replace `region_element.innerHTML`. Only include changed regions.
 | `data-action` | Buttons, inputs, selects | Declares interactive intent. Runtime logs clicks and input events on these elements. |
 | `data-id` | Entity elements | Stable identifier across HTML updates. Agent maintains semantic stability (e.g. "task_3" always means the same task). |
 
-Also: `data-payload='{"key":"value"}'` on any `[data-action]` element to attach structured JSON data to the logged action.
+Also: `data-payload='{"key":"value"}'` on any `[data-action]` element to attach
+structured JSON data to the logged action.
 
-`[data-action]` on `<input>`, `<textarea>`, `<select>` includes the `value` field in the logged action.
+`[data-action]` on `<input>`, `<textarea>`, `<select>` includes the `value` field
+in the logged action.
+
+## Workflow
+
+### 1. Start the bridge and open the browser
+
+Start the bridge server (default port 3001, configurable via `--port` or `PORT` env
+var). Tell the user to open `http://localhost:3001` in their browser.
+
+### 2. Send the initial HTML
+
+Write a complete HTML page using the 3 attributes, with the Agent API script (see
+template below). Send it to the UI — either from a file or inline HTML. Sending
+again replaces the entire UI.
+
+### 3. Read user actions
+
+Poll for actions (non-blocking, returns null if nothing new) or wait for the next
+action (blocking, up to 60s). Filter by action name to skip noise. Read the full
+history from the actions log file.
+
+Output is clean business JSON: `{"action":"select_task","id":"task_1","value":"..."}`
+
+### 4. Push updates to regions (optional)
+
+Push a JSON object mapping region names to new innerHTML content. Only include
+regions that changed. Values replace the region element's innerHTML — preserve
+`data-region`, `data-action`, `data-id` attributes in the HTML you push.
 
 ## Initial HTML Template
 
@@ -127,28 +119,34 @@ Rules:
 - Preserve `data-id` stability across updates.
 - Preserve `data-action` and `data-region` attributes in the generated HTML.
 
-## Bridge API & CLI
+## Capabilities
 
-| Endpoint | CLI | Purpose |
-|----------|-----|---------|
-| `GET /` | _(browser opens this)_ | Serves runtime page |
-| `POST /init` | `agent-gui send --file /tmp/ui.html` | Send full HTML (also `--html "..."`) |
-| `POST /update` | `agent-gui update '{"r":"html"}'` | Push region innerHTML updates |
-| `GET /wait?timeout=N` | `agent-gui wait [-t N] [-a action]` | Pop action. `-t 0` non-blocking, default 60s. `-a` filters by action name. `null` if empty/timeout. |
-| `GET /status` | `agent-gui status` | `"connected"` or `"disconnected"` |
+The bridge provides these operations:
 
-CLI output strips `type`, `context`, `region` — only business data. All actions also appended to `/tmp/agent-gui-actions.jsonl` (one JSON object per line, full history).
+| Operation | Purpose |
+|-----------|---------|
+| Serve runtime | Serves the browser runtime page |
+| Initialize UI | Send full HTML to the iframe |
+| Update regions | Push innerHTML updates to named regions |
+| Poll actions | Pop next action from the queue (with optional timeout and action filter) |
+| Check status | Query whether the browser is connected |
 
-Port: `bridge.py --port 8080` / `PORT=8080` env. CLI: `agent-gui --port 8080 ...` / `AGENT_GUI_PORT=8080` env. Default 3001.
+Output always strips internal fields — only business data is returned. All actions
+are also appended to an actions log file (one JSON object per line, full history).
+
+Port configuration: the bridge server accepts `--port` or `PORT` env var. The CLI
+accepts `--port` or `AGENT_GUI_PORT` env var. Default port is 3001.
 
 ## Advanced
 
-**Agent.act()** — programmatic actions from inline scripts:
+**Programmatic actions** — trigger actions from inline scripts:
+
 ```js
 Agent.act("drag_complete", { id: "task_1", from: "todo", to: "in_progress" });
 ```
 
 **Optimistic update** — instant local feedback before the Agent responds:
+
 ```html
 <button onclick="this.closest('[data-id]')?.remove();Agent.act('delete_task',{id:this.dataset.id})">
   Delete
@@ -156,6 +154,7 @@ Agent.act("drag_complete", { id: "task_1", from: "todo", to: "in_progress" });
 ```
 
 **Web Components** — native encapsulation for reusable patterns:
+
 ```html
 <script>
   class TaskCard extends HTMLElement {
@@ -170,9 +169,10 @@ Agent.act("drag_complete", { id: "task_1", from: "todo", to: "in_progress" });
 
 ## Blocking Input Pattern
 
-When the Agent needs user input before continuing, use `Agent.act()` in the submit handler and block with `agent-gui wait --action submit`:
+When the Agent needs user input before continuing, use `Agent.act()` in the submit
+handler and wait for a specific action name:
 
-**Unique form markup** (wrap in the standard HTML template, adding `data-region="form"`):
+**Form markup** (wrap in the standard HTML template, adding `data-region="form"`):
 
 ```html
 <div data-region="form" style="max-width:480px;margin:48px auto;display:flex;flex-direction:column;gap:12px;">
@@ -186,52 +186,69 @@ When the Agent needs user input before continuing, use `Agent.act()` in the subm
 </div>
 ```
 
-```bash
-agent-gui send --file /tmp/form.html
-agent-gui wait --action submit   # blocks until user clicks Submit
-# → {"action":"submit","value":"whatever the user typed"}
-```
-
-The `value` field (or any custom fields passed to `Agent.act()`) appears directly in the output — no HTML parsing needed. Returns `null` on timeout; use `-t 30` for a shorter timeout.
+Send the form HTML, then wait for the `submit` action. The `value` field (or any
+custom fields passed to `Agent.act()`) appears directly in the output — no HTML
+parsing needed. Returns null on timeout; use a shorter timeout if needed.
 
 ## Multi-step Wizard
 
-Use when **each step's UI depends on the LLM processing the previous step's input** — otherwise a single form is simpler.
+Use when **each step's UI depends on the LLM processing the previous step's
+input** — otherwise a single form is simpler.
 
 ```
 Step 1: search query
-  → agent-gui send --file search.html
-  → wait -a submit → {"query": "pandas merge on two columns"}
+  → send search form HTML
+  → wait for submit action → {"query": "pandas merge on two columns"}
   → LLM thinks, generates results HTML
 
 Step 2: show results, user picks one
-  → agent-gui update '{"results":"<div data-id='r1' data-action='select'>...</div>..."}'
-  → wait -a select → {"action":"select","id":"r1"}
+  → push results region update
+  → wait for select action → {"action":"select","id":"r1"}
   → LLM thinks, generates detail HTML
 
 Step 3: show detail
-  → agent-gui update '{"detail":"<h3>pd.merge(left, right, on=['col1','col2'])</h3>..."}'
+  → push detail region update
 ```
 
-Key: `-a submit` / `-a select` filters out input noise. Use `agent-gui update` between steps to avoid full-page flicker.
+Key: filter by action name to skip input noise. Push region updates between steps
+to avoid full-page flicker.
 
 ## Dashboard Refresh
 
-When the Agent should stand by and respond to sporadic user actions (dashboards, games, data explorers), poll non-blocking:
+When the Agent should stand by and respond to sporadic user actions (dashboards,
+games, data explorers), poll non-blocking in a loop:
 
-```bash
-agent-gui send --file /tmp/dashboard.html
+```
+send dashboard HTML
 
-while true; do
-  result=$(agent-gui wait -t 0)
-  [ "$result" = "null" ] && { sleep 2; continue; }
-
-  action=$(echo "$result" | python3 -c "import sys,json;print(json.load(sys.stdin)['action'])")
-  case "$action" in
-    "filter_changed") agent-gui update '{"chart":"<div data-region=\"chart\">...updated...</div>"}' ;;
-    "export_data")    ... ;;
-  esac
-done
+loop:
+  poll for next action (non-blocking)
+  if null: sleep briefly, continue
+  dispatch based on action name:
+    "filter_changed" → push updated chart region
+    "export_data"    → handle export
 ```
 
-The Agent polls lazily — actions accumulate in the log regardless, so no data is lost between polls.
+The Agent polls lazily — actions accumulate in the log regardless, so no data is
+lost between polls.
+
+## Gotchas
+
+- **`data-region` values must be unique per page.** Duplicate region names cause
+  ambiguous context capture and update targeting.
+- **`data-action` on inputs automatically captures `value`.** Don't manually pass
+  the value in `Agent.act()` for input/textarea/select — it's already included.
+- **Updates replace innerHTML, not the element.** When pushing region updates,
+  include `data-region`, `data-action`, `data-id` attributes in the new HTML so
+  interactivity is preserved.
+- **Start the bridge before sending HTML.** The bridge must be running and the
+  browser connected before the first HTML is sent.
+- **Browser refresh resets the UI.** If the user refreshes the browser, the bridge
+  persists but the UI resets to the runtime page — re-send the HTML.
+- **The Agent API script is mandatory.** Every initial HTML must include the
+  `window.Agent` script at the end of `<body>`, or no actions will be captured.
+- **Actions are always logged.** Even when not actively polling, all user actions
+  accumulate in the log file — no data loss between polls.
+- **Don't use `data-id` on the same element as `data-region`.** They serve
+  different purposes: region is the update target, id is stable identity across
+  updates.
