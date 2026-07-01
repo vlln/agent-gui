@@ -18,21 +18,16 @@ freely; the Agent only reads actions when asked in chat. Use `data-region`,
 
 ```
 Agent generates UI → User interacts (0 to ∞ actions, no Agent involvement)
-                                │
-            User in chat: "what did I do?" / "update the chart"
-                                │
-                  Agent reads action log → responds or pushes UI updates
+                               │
+           User in chat: "what did I do?" / "update the chart"
+                               │
+                 Agent reads action log → responds or pushes UI updates
 ```
 
 ## Trigger Keywords
 
 GUI, UI, dashboard, form, chart, interactive, widget, visual, interface, browser,
 HTML, web app, task board, CRUD, data explorer, mini-game, wizard, drag-and-drop
-
-## When To Use
-
-Anything visual beyond Markdown: dashboards, task boards, forms, charts, CRUD,
-mini-games, data explorers, multi-step workflows.
 
 ## The 3 Attributes
 
@@ -42,26 +37,28 @@ mini-games, data explorers, multi-step workflows.
 | `data-action` | Buttons, inputs, selects | Declares interactive intent. Runtime logs clicks and input events on these elements. |
 | `data-id` | Entity elements | Stable identifier across HTML updates. Agent maintains semantic stability (e.g. "task_3" always means the same task). |
 
-Also: `data-payload='{"key":"value"}'` on any `[data-action]` element to attach
-structured JSON data to the logged action.
+`data-payload='{"key":"value"}'` on any `[data-action]` element attaches structured
+JSON data to the logged action.
 
 `[data-action]` on `<input>`, `<textarea>`, `<select>` includes the `value` field
-in the logged action.
+in the logged action automatically.
 
 ## Workflow
 
-### 1. Start the bridge and open the browser
+### Stage 1: Start the bridge
 
-Start the bridge server (default port 3001, configurable via `--port` or `PORT` env
-var). Tell the user to open `http://localhost:3001` in their browser.
+Start the bridge server. Default port 3001. Tell the user to open
+`http://localhost:3001` in their browser.
 
-### 2. Send the initial HTML
+**Checkpoint:** bridge is running and browser is connected before proceeding.
 
-Write a complete HTML page using the 3 attributes, with the Agent API script (see
-template below). Send it to the UI — either from a file or inline HTML. Sending
-again replaces the entire UI.
+### Stage 2: Send the initial HTML
 
-### 3. Read user actions
+Write a complete HTML page using the 3 attributes, with the Agent API script at the
+end of `<body>` (see [Initial HTML Template](#initial-html-template)). Sending again
+replaces the entire UI.
+
+### Stage 3: Read user actions
 
 Poll for actions (non-blocking, returns null if nothing new) or wait for the next
 action (blocking, up to 60s). Filter by action name to skip noise. Read the full
@@ -69,11 +66,19 @@ history from the actions log file.
 
 Output is clean business JSON: `{"action":"select_task","id":"task_1","value":"..."}`
 
-### 4. Push updates to regions (optional)
+### Stage 4: Push updates to regions (optional)
 
 Push a JSON object mapping region names to new innerHTML content. Only include
-regions that changed. Values replace the region element's innerHTML — preserve
-`data-region`, `data-action`, `data-id` attributes in the HTML you push.
+regions that changed. See [Update Response Format](#update-response-format).
+
+**Checklist before shipping a UI:**
+
+- [ ] Bridge is running and browser is connected
+- [ ] Initial HTML includes the `window.Agent` script at end of `<body>`
+- [ ] All `data-region` values are unique
+- [ ] `data-action` elements target user interactions, not internal logic
+- [ ] `data-id` values are stable across potential updates
+- [ ] `data-region` and `data-id` are not on the same element
 
 ## Initial HTML Template
 
@@ -85,7 +90,7 @@ Every initial HTML MUST include the Agent API script at the end of `<body>`:
 <head>
   <meta charset="utf-8">
   <style>
-    /* Polish: system-ui font, colors, shadows, rounded corners, hover states */
+    /* Your styles here */
   </style>
 </head>
 <body>
@@ -102,6 +107,12 @@ Every initial HTML MUST include the Agent API script at the end of `<body>`:
 </html>
 ```
 
+To trigger actions from inline scripts (e.g. drag-and-drop, custom widgets):
+
+```js
+Agent.act("drag_complete", { id: "task_1", from: "todo", to: "in_progress" });
+```
+
 ## Update Response Format
 
 When pushing updates, send a **JSON object** (not markdown-wrapped):
@@ -116,8 +127,8 @@ When pushing updates, send a **JSON object** (not markdown-wrapped):
 Rules:
 - Values are **innerHTML** — the content inside the region element, not the element itself.
 - Only include regions that changed.
+- Preserve `data-region`, `data-action`, `data-id` attributes in the generated HTML.
 - Preserve `data-id` stability across updates.
-- Preserve `data-action` and `data-region` attributes in the generated HTML.
 
 ## Capabilities
 
@@ -137,42 +148,12 @@ are also appended to an actions log file (one JSON object per line, full history
 Port configuration: the bridge server accepts `--port` or `PORT` env var. The CLI
 accepts `--port` or `AGENT_GUI_PORT` env var. Default port is 3001.
 
-## Advanced
+## UI Patterns
 
-**Programmatic actions** — trigger actions from inline scripts:
-
-```js
-Agent.act("drag_complete", { id: "task_1", from: "todo", to: "in_progress" });
-```
-
-**Optimistic update** — instant local feedback before the Agent responds:
-
-```html
-<button onclick="this.closest('[data-id]')?.remove();Agent.act('delete_task',{id:this.dataset.id})">
-  Delete
-</button>
-```
-
-**Web Components** — native encapsulation for reusable patterns:
-
-```html
-<script>
-  class TaskCard extends HTMLElement {
-    connectedCallback() {
-      this.innerHTML = `<div class="task" data-id="${this.dataset.id}" data-action="select_task"><slot></slot></div>`;
-    }
-  }
-  customElements.define("task-card", TaskCard);
-</script>
-<task-card data-id="task_1">Build Agent UI</task-card>
-```
-
-## Blocking Input Pattern
+### Blocking Input
 
 When the Agent needs user input before continuing, use `Agent.act()` in the submit
 handler and wait for a specific action name:
-
-**Form markup** (wrap in the standard HTML template, adding `data-region="form"`):
 
 ```html
 <div data-region="form" style="max-width:480px;margin:48px auto;display:flex;flex-direction:column;gap:12px;">
@@ -190,10 +171,10 @@ Send the form HTML, then wait for the `submit` action. The `value` field (or any
 custom fields passed to `Agent.act()`) appears directly in the output — no HTML
 parsing needed. Returns null on timeout; use a shorter timeout if needed.
 
-## Multi-step Wizard
+### Multi-step Wizard
 
-Use when **each step's UI depends on the LLM processing the previous step's
-input** — otherwise a single form is simpler.
+Use when each step's UI depends on the LLM processing the previous step's input.
+Otherwise a single form is simpler.
 
 ```
 Step 1: search query
@@ -213,7 +194,7 @@ Step 3: show detail
 Key: filter by action name to skip input noise. Push region updates between steps
 to avoid full-page flicker.
 
-## Dashboard Refresh
+### Dashboard Refresh
 
 When the Agent should stand by and respond to sporadic user actions (dashboards,
 games, data explorers), poll non-blocking in a loop:
@@ -236,8 +217,8 @@ lost between polls.
 
 - **`data-region` values must be unique per page.** Duplicate region names cause
   ambiguous context capture and update targeting.
-- **`data-action` on inputs automatically captures `value`.** Don't manually pass
-  the value in `Agent.act()` for input/textarea/select — it's already included.
+- **`data-action` on inputs automatically captures `value`.** Don't pass the value
+  again in `Agent.act()` for input/textarea/select — it's already included.
 - **Updates replace innerHTML, not the element.** When pushing region updates,
   include `data-region`, `data-action`, `data-id` attributes in the new HTML so
   interactivity is preserved.
@@ -252,3 +233,10 @@ lost between polls.
 - **Don't use `data-id` on the same element as `data-region`.** They serve
   different purposes: region is the update target, id is stable identity across
   updates.
+
+## References
+
+- `scripts/agent-gui` — CLI tool for starting the bridge, polling actions, and
+  pushing updates.
+- `resources/runtime.html` — The runtime page served by the bridge. Read this
+  when debugging bridge behavior or understanding the iframe environment.
