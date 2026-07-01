@@ -1,13 +1,58 @@
-# Agent GUI
+<h1 align="center">Agent GUI</h1>
 
-Exploring **generative UI** — where LLMs emit interactive interfaces directly, instead of only text.
+<p align="center">
+  <strong>LLMs emit interactive browser UIs using just 3 custom HTML attributes.</strong><br/>
+  Generate dashboards, forms, charts, CRUD interfaces, and multi-step workflows — no new DSL or UI protocol. The LLM is the UI function; the runtime is a thin wire: inject → capture → forward → apply.
+</p>
 
-The core idea: HTML is already the LLM's native UI language. Instead of inventing a new UI protocol for agents, we give the LLM 3 custom attributes (`data-region`, `data-action`, `data-id`) and let it generate anything.
+<p align="center">
+  <a href="https://github.com/vlln/agent-gui/stargazers"><img src="https://badgen.net/github/stars/vlln/agent-gui?label=%E2%98%85" alt="GitHub stars" /></a>
+  <img src="https://badgen.net/badge/license/MIT/blue" alt="MIT" />
+  <img src="https://badgen.net/badge/spec/Agent%20Skills/8257D0" alt="Agent Skills spec" />
+</p>
 
+---
+
+## Installation
+
+### [skit](https://github.com/vlln/skit) (Recommended)
+
+```bash
+skit install https://github.com/vlln/agent-gui/tree/main/skills/agent-gui
 ```
-LLM as UI function:  f(current HTML, user action) → new HTML
-Runtime as thin wire: inject → capture → forward → apply
+
+### [skill.sh](https://github.com/vercel-labs/skills)
+
+```bash
+npx skills add vlln/agent-gui
 ```
+
+### Manually
+
+| Agent | Command |
+|-------|---------|
+| **Claude Code** | `cp -r skills/agent-gui .claude/skills/` |
+| **Codex** | `cp -r skills/agent-gui ~/.codex/skills/` |
+| **OpenCode** | `git clone https://github.com/vlln/agent-gui.git ~/.opencode/skills/agent-gui` |
+| **Kimi** | `cp -r skills/agent-gui ~/.kimi/skills/` |
+
+---
+
+## Skills
+
+| Skill | Description |
+|-------|-------------|
+| [agent-gui](skills/agent-gui/SKILL.md) | Generate interactive HTML UIs — dashboards, task boards, forms, charts, CRUD interfaces, mini-games, data explorers, and multi-step workflows. |
+
+## Requirements
+
+- `python3`
+
+## License
+
+MIT
+
+---
 
 ## Why not Markdown?
 
